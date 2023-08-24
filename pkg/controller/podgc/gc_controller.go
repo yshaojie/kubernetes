@@ -109,24 +109,32 @@ func (gcc *PodGCController) Run(ctx context.Context) {
 	<-ctx.Done()
 }
 
+// 执行Pod GC的核心方法
 func (gcc *PodGCController) gc(ctx context.Context) {
+	//获取全量pod
 	pods, err := gcc.podLister.List(labels.Everything())
 	if err != nil {
 		klog.Errorf("Error while listing all pods: %v", err)
 		return
 	}
+	//获取全量node
 	nodes, err := gcc.nodeLister.List(labels.Everything())
 	if err != nil {
 		klog.Errorf("Error while listing all nodes: %v", err)
 		return
 	}
+	//如果terminated pod有数量上线，则进行回收，保证terminated pod数量在阈值以下
+	//terminatedPodThreshold可通过启动参数配置
 	if gcc.terminatedPodThreshold > 0 {
 		gcc.gcTerminated(ctx, pods)
 	}
 	if utilfeature.DefaultFeatureGate.Enabled(features.NodeOutOfServiceVolumeDetach) {
+		//回收终止中的pod，前提是该pod所在的节点处于不可服务状态
 		gcc.gcTerminating(ctx, pods)
 	}
+	//回收孤儿pod
 	gcc.gcOrphaned(ctx, pods, nodes)
+	//回收终止中(DeletionTimestamp != nil)并且还没被调度(len(pod.Spec.NodeName) == 0)的pod
 	gcc.gcUnscheduledTerminating(ctx, pods)
 }
 
