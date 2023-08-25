@@ -2002,6 +2002,7 @@ func (kl *Kubelet) canRunPod(pod *v1.Pod) lifecycle.PodAdmitResult {
 // any new change seen, will run a sync against desired state and running state. If
 // no changes are seen to the configuration, will synchronize the last known desired
 // state every sync-frequency seconds. Never returns.
+// 核心调度逻辑
 func (kl *Kubelet) syncLoop(updates <-chan kubetypes.PodUpdate, handler SyncHandler) {
 	klog.InfoS("Starting kubelet main sync loop")
 	// The syncTicker wakes up kubelet to checks if there are any pod workers
@@ -2059,10 +2060,10 @@ func (kl *Kubelet) syncLoop(updates <-chan kubetypes.PodUpdate, handler SyncHand
 // The workflow is to read from one of the channels, handle that event, and
 // update the timestamp in the sync loop monitor.
 //
-// Here is an appropriate place to note that despite the syntactical
+// here is an appropriate place to note that despite the syntactical
 // similarity to the switch statement, the case statements in a select are
 // evaluated in a pseudorandom order if there are multiple channels ready to
-// read from when the select is evaluated.  In other words, case statements
+// read from when the select is evaluated.  in other words, case statements
 // are evaluated in random order, and you can not assume that the case
 // statements evaluate in order if multiple channels have events.
 //

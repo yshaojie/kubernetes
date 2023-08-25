@@ -59,6 +59,7 @@ type PodConfig struct {
 	mux  *config.Mux
 
 	// the channel of denormalized changes passed to listeners
+	//这个channel包含了file，url，api-server的变更，这三个变更来源都会写入updates channel
 	updates chan kubetypes.PodUpdate
 
 	// contains the list of all configured sources
