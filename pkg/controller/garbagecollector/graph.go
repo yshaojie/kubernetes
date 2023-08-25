@@ -53,7 +53,7 @@ type node struct {
 	// this records if the object's deletionTimestamp is non-nil.
 	beingDeleted     bool
 	beingDeletedLock sync.RWMutex
-	// this records if the object was constructed virtually and never observed via informer event
+	// this records if the object was constructabsentOwnerCacheed virtually and never observed via informer event
 	virtual     bool
 	virtualLock sync.RWMutex
 	// when processing an Update event, we need to compare the updated

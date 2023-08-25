@@ -135,6 +135,10 @@ func (gc *GarbageCollector) resyncMonitors(deletableResources map[schema.GroupVe
 	if err := gc.dependencyGraphBuilder.syncMonitors(deletableResources); err != nil {
 		return err
 	}
+	//本方法做了两件事:
+	//1.调用GKV对应sharedInformer的start方法
+	//2.monitor.Run()->controller.Run()
+	//从这两个方法可以看出，就是采用了informer机制
 	gc.dependencyGraphBuilder.startMonitors()
 	return nil
 }
@@ -192,6 +196,7 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 		}
 
 		// Decide whether discovery has reported a change.
+		//如果出现资源变化，则需要重置监听器
 		if reflect.DeepEqual(oldResources, newResources) {
 			klog.V(5).Infof("no resource updates from discovery, skipping garbage collector sync")
 			return
@@ -204,11 +209,13 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 
 		// Once we get here, we should not unpause workers until we've successfully synced
 		attempt := 0
+		//重新重置监听器直到成功
 		wait.PollImmediateUntil(100*time.Millisecond, func() (bool, error) {
 			attempt++
 
 			// On a reattempt, check if available resources have changed
 			if attempt > 1 {
+				//为了避免重置过程中出现资源变化,这里重新获取可删除的资源列表
 				newResources = GetDeletableResources(discoveryClient)
 				if len(newResources) == 0 {
 					klog.V(2).Infof("no resources reported by discovery (attempt %d)", attempt)
@@ -246,6 +253,7 @@ func (gc *GarbageCollector) Sync(discoveryClient discovery.ServerResourcesInterf
 			// informers keep attempting to sync in the background, so retrying doesn't interrupt them.
 			// the call to resyncMonitors on the reattempt will no-op for resources that still exist.
 			// note that workers stay paused until we successfully resync.
+			//等待所有资源都已同步完成,其实就是保证所有资源的(controller.HasSynced()==true)
 			if !cache.WaitForNamedCacheSync("garbage collector", waitForStopOrTimeout(stopCh, period), gc.dependencyGraphBuilder.IsSynced) {
 				utilruntime.HandleError(fmt.Errorf("timed out waiting for dependency graph builder sync during GC sync (attempt %d)", attempt))
 				metrics.GarbageCollectorResourcesSyncError.Inc()

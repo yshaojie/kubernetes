@@ -212,6 +212,7 @@ func (gb *GraphBuilder) syncMonitors(resources map[schema.GroupVersionResource]s
 			errs = append(errs, fmt.Errorf("couldn't look up resource %q: %v", resource, err))
 			continue
 		}
+		//这里GKV的控制器,当其对应的资源发成变化时,添加事件到graphChanges
 		c, s, err := gb.controllerFor(resource, kind)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("couldn't start monitor for resource %q: %v", resource, err))
@@ -300,6 +301,7 @@ func (gb *GraphBuilder) Run(stopCh <-chan struct{}) {
 	// Start monitors and begin change processing until the stop channel is
 	// closed.
 	gb.startMonitors()
+	//处理队列GraphBuilder.graphChanges里的数据，构建Graph
 	wait.Until(gb.runProcessGraphChanges, 1*time.Second, stopCh)
 
 	// Stop any running monitors.
@@ -767,6 +769,7 @@ func (gb *GraphBuilder) processGraphChanges() bool {
 			if len(existingNode.dependents) > 0 {
 				gb.absentOwnerCache.Add(identityFromEvent(event, accessor))
 			}
+			//将资源的子节点添加到删除队列（即属主为当前资源的资源，例如ReplicaSet下所属的POD）
 			for dep := range existingNode.dependents {
 				gb.attemptToDelete.Add(dep)
 			}
@@ -777,6 +780,7 @@ func (gb *GraphBuilder) processGraphChanges() bool {
 				}
 				// this is to let attempToDeleteItem check if all the owner's
 				// dependents are deleted, if so, the owner will be deleted.
+				//作为属主，如果其下资源都已被清除，有可能该属主也会被清除，所以属主也需要做删除检测
 				gb.attemptToDelete.Add(ownerNode)
 			}
 		}
