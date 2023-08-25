@@ -570,6 +570,7 @@ func (gc *GarbageCollector) attemptToDeleteItem(ctx context.Context, item *node)
 		if err != nil {
 			return err
 		}
+		//更新item的ownerReferences,删除非solid的ownerReferences
 		_, err = gc.patch(item, p, func(n *node) ([]byte, error) {
 			return gc.deleteOwnerRefJSONMergePatch(n, ownerUIDs...)
 		})
@@ -601,6 +602,7 @@ func (gc *GarbageCollector) attemptToDeleteItem(ctx context.Context, item *node)
 		// FinalizerDeletingDependents from the item, resulting in the final
 		// deletion of the item.
 		policy := metav1.DeletePropagationForeground
+		//调用api-server删除item
 		return gc.deleteObject(item.identity, &policy)
 	default:
 		// item doesn't have any solid owner, so it needs to be garbage
@@ -620,6 +622,7 @@ func (gc *GarbageCollector) attemptToDeleteItem(ctx context.Context, item *node)
 		}
 		klog.V(2).InfoS("Deleting object", "object", klog.KRef(item.identity.Namespace, item.identity.Name),
 			"objectUID", item.identity.UID, "kind", item.identity.Kind, "propagationPolicy", policy)
+		//调用api-server删除item
 		return gc.deleteObject(item.identity, &policy)
 	}
 }
