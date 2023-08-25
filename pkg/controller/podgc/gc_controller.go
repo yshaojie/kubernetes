@@ -133,6 +133,7 @@ func (gcc *PodGCController) gc(ctx context.Context) {
 		gcc.gcTerminating(ctx, pods)
 	}
 	//回收孤儿pod
+	//孤儿pod就是node.spec.nodeName对应的节点不存在
 	gcc.gcOrphaned(ctx, pods, nodes)
 	//回收终止中(DeletionTimestamp != nil)并且还没被调度(len(pod.Spec.NodeName) == 0)的pod
 	gcc.gcUnscheduledTerminating(ctx, pods)
@@ -238,12 +239,15 @@ func (gcc *PodGCController) gcOrphaned(ctx context.Context, pods []*v1.Pod, node
 		}
 	}
 	// Check if nodes are still missing after quarantine period
+	//所有pod绑定的nodeName不存在的列表
 	deletedNodesNames, quit := gcc.discoverDeletedNodes(ctx, existingNodeNames)
 	if quit {
 		return
 	}
 	// Delete orphaned pods
 	for _, pod := range pods {
+		//pod的nodeName在deletedNodesNames里面，才说明是孤儿pod
+		//即pod绑定的node不存在
 		if !deletedNodesNames.Has(pod.Spec.NodeName) {
 			continue
 		}
