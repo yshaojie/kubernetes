@@ -697,6 +697,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, podStatus *kubecontaine
 		}
 
 		if podContainerChanges.CreateSandbox {
+			//TODO 不知道啥意思
 			m.purgeInitContainers(pod, podStatus)
 		}
 	} else {
@@ -871,6 +872,7 @@ func (m *kubeGenericRuntimeManager) SyncPod(pod *v1.Pod, podStatus *kubecontaine
 	// These are started "prior" to init containers to allow running ephemeral containers even when there
 	// are errors starting an init container. In practice init containers will start first since ephemeral
 	// containers cannot be specified on pod creation.
+	//启动debug容器
 	for _, idx := range podContainerChanges.EphemeralContainersToStart {
 		start("ephemeral container", metrics.EphemeralContainer, ephemeralContainerStartSpec(&pod.Spec.EphemeralContainers[idx]))
 	}

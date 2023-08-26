@@ -1598,6 +1598,7 @@ func (kl *Kubelet) syncPod(ctx context.Context, updateType kubetypes.SyncPodType
 	kl.statusManager.SetPodStatus(pod, apiPodStatus)
 
 	// Pods that are not runnable must be stopped - return a typed error to the pod worker
+	//1.判断POD是否可运行
 	if !runnable.Admit {
 		klog.V(2).InfoS("Pod is not runnable and must have running containers stopped", "pod", klog.KObj(pod), "podUID", pod.UID, "message", runnable.Message)
 		var syncErr error
@@ -1615,12 +1616,14 @@ func (kl *Kubelet) syncPod(ctx context.Context, updateType kubetypes.SyncPodType
 	}
 
 	// If the network plugin is not ready, only start the pod if it uses the host network
+	//2.检查网络已就绪
 	if err := kl.runtimeState.networkErrors(); err != nil && !kubecontainer.IsHostNetworkPod(pod) {
 		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.NetworkNotReady, "%s: %v", NetworkNotReadyErrorMsg, err)
 		return false, fmt.Errorf("%s: %v", NetworkNotReadyErrorMsg, err)
 	}
 
 	// ensure the kubelet knows about referenced secrets or configmaps used by the pod
+	//3.注册secret和configMap
 	if !kl.podWorkers.IsPodTerminationRequested(pod.UID) {
 		if kl.secretManager != nil {
 			kl.secretManager.RegisterPod(pod)
@@ -1712,6 +1715,7 @@ func (kl *Kubelet) syncPod(ctx context.Context, updateType kubetypes.SyncPodType
 	}
 
 	// Make data directories for the pod
+	//4.创建POD的数据目录
 	if err := kl.makePodDataDirs(pod); err != nil {
 		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToMakePodDataDirectories, "error making pod data directories: %v", err)
 		klog.ErrorS(err, "Unable to make pod data directories for pod", "pod", klog.KObj(pod))
@@ -1733,9 +1737,11 @@ func (kl *Kubelet) syncPod(ctx context.Context, updateType kubetypes.SyncPodType
 	pullSecrets := kl.getPullSecretsForPod(pod)
 
 	// Ensure the pod is being probed
+	//5.构建POD探测worker并启动
 	kl.probeManager.AddPod(pod)
 
 	// Call the container runtime's SyncPod callback
+	//6.执行容器启动操作
 	result := kl.containerRuntime.SyncPod(pod, podStatus, pullSecrets, kl.backOff)
 	kl.reasonCache.Update(pod.UID, result)
 	if err := result.Error(); err != nil {
@@ -2080,7 +2086,7 @@ func (kl *Kubelet) syncLoop(updates <-chan kubetypes.PodUpdate, handler SyncHand
 func (kl *Kubelet) syncLoopIteration(configCh <-chan kubetypes.PodUpdate, handler SyncHandler,
 	syncCh <-chan time.Time, housekeepingCh <-chan time.Time, plegCh <-chan *pleg.PodLifecycleEvent) bool {
 	select {
-	case u, open := <-configCh:
+	case u, open := <-configCh: //file，url，api-server pod变更
 		// Update from a config source; dispatch it to the right handler
 		// callback.
 		if !open {
@@ -2228,6 +2234,7 @@ func (kl *Kubelet) handleMirrorPod(mirrorPod *v1.Pod, start time.Time) {
 // a config source.
 func (kl *Kubelet) HandlePodAdditions(pods []*v1.Pod) {
 	start := kl.clock.Now()
+	//对pod排序，保证先创建的pod优先运行
 	sort.Sort(sliceutils.PodsByCreationTime(pods))
 	for _, pod := range pods {
 		existingPods := kl.podManager.GetPods()

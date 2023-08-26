@@ -581,6 +581,7 @@ func (p *podWorkers) UpdatePod(options UpdatePodOptions) {
 	// decide what to do with this pod - we are either setting it up, tearing it down, or ignoring it
 	now := time.Now()
 	status, ok := p.podSyncStatuses[uid]
+	//pod的syncstatus不存在的话，需要进行初始化
 	if !ok {
 		klog.V(4).InfoS("Pod is being synced for the first time", "pod", klog.KObj(pod), "podUID", pod.UID)
 		status = &podSyncStatus{
@@ -719,6 +720,7 @@ func (p *podWorkers) UpdatePod(options UpdatePodOptions) {
 
 	// start the pod worker goroutine if it doesn't exist
 	podUpdates, exists := p.podUpdates[uid]
+	//每个pod都会有一个goroutine和chan来进行sync操作
 	if !exists {
 		// We need to have a buffer here, because checkForUpdates() method that
 		// puts an update into channel is called from the same goroutine where
@@ -747,6 +749,7 @@ func (p *podWorkers) UpdatePod(options UpdatePodOptions) {
 		// comment in syncPod.
 		go func() {
 			defer runtime.HandleCrash()
+			//启动同步操作
 			p.managePodLoop(outCh)
 		}()
 	}

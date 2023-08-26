@@ -156,7 +156,7 @@ func (w *worker) run() {
 	if probeTickerPeriod > time.Since(w.probeManager.start) {
 		time.Sleep(time.Duration(rand.Float64() * float64(probeTickerPeriod)))
 	}
-
+	//用于定时执行探测的定时器
 	probeTicker := time.NewTicker(probeTickerPeriod)
 
 	defer func() {
@@ -165,7 +165,7 @@ func (w *worker) run() {
 		if !w.containerID.IsEmpty() {
 			w.resultsManager.Remove(w.containerID)
 		}
-
+		//移除当前探测worker
 		w.probeManager.removeWorker(w.pod.UID, w.container.Name, w.probeType)
 		ProberResults.Delete(w.proberResultsSuccessfulMetricLabels)
 		ProberResults.Delete(w.proberResultsFailedMetricLabels)
@@ -175,6 +175,7 @@ func (w *worker) run() {
 	}()
 
 probeLoop:
+	//执行探测动作
 	for w.doProbe() {
 		// Wait for next probe tick.
 		select {
@@ -235,6 +236,8 @@ func (w *worker) doProbe() (keepGoing bool) {
 		w.onHold = false
 	}
 
+	//onHold当探测失败时会设置为true,为的就是能够避免不必要的探测
+	//等待新的容器启动后,才会继续执行探测
 	if w.onHold {
 		// Worker is on hold until there is a new container.
 		return true
@@ -266,24 +269,28 @@ func (w *worker) doProbe() (keepGoing bool) {
 	}
 
 	// Probe disabled for InitialDelaySeconds.
+	//未到延迟探测时间,则不进行探测
 	if int32(time.Since(c.State.Running.StartedAt.Time).Seconds()) < w.spec.InitialDelaySeconds {
 		return true
 	}
-
+	//容器已经启动
 	if c.Started != nil && *c.Started {
 		// Stop probing for startup once container has started.
 		// we keep it running to make sure it will work for restarted container.
+		//容器已启动情况下,startup probe停止探测
 		if w.probeType == startup {
 			return true
 		}
 	} else {
 		// Disable other probes until container has started.
+		//容器未启动,那么非startup probe不执行
 		if w.probeType != startup {
 			return true
 		}
 	}
 
 	// Note, exec probe does NOT have access to pod environment variables or downward API
+	//发起探测请求
 	result, err := w.probeManager.prober.probe(w.probeType, w.pod, status, w.container, w.containerID)
 	if err != nil {
 		// Prober error, throw away the result.
@@ -314,6 +321,7 @@ func (w *worker) doProbe() (keepGoing bool) {
 		return true
 	}
 
+	//resultsManager会把result写入channel
 	w.resultsManager.Set(w.containerID, result, w.pod)
 
 	if (w.probeType == liveness || w.probeType == startup) && result == results.Failure {

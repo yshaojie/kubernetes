@@ -593,7 +593,9 @@ func (m *kubeGenericRuntimeManager) executePreStopHook(pod *v1.Pod, containerID 
 		}
 	}()
 
+	//等待执行完毕或者超时
 	select {
+	//用于超时探测
 	case <-time.After(time.Duration(gracePeriod) * time.Second):
 		klog.V(2).InfoS("PreStop hook not completed in grace period", "pod", klog.KObj(pod), "podUID", pod.UID,
 			"containerName", containerSpec.Name, "containerID", containerID.String(), "gracePeriod", gracePeriod)
@@ -601,7 +603,7 @@ func (m *kubeGenericRuntimeManager) executePreStopHook(pod *v1.Pod, containerID 
 		klog.V(3).InfoS("PreStop hook completed", "pod", klog.KObj(pod), "podUID", pod.UID,
 			"containerName", containerSpec.Name, "containerID", containerID.String())
 	}
-
+	//计算耗时并返回
 	return int64(metav1.Now().Sub(start.Time).Seconds())
 }
 
@@ -673,6 +675,7 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 	}
 
 	// From this point, pod and container must be non-nil.
+	//获取优雅关闭容器时间阈值
 	gracePeriod := setTerminationGracePeriod(pod, containerSpec, containerName, containerID, reason)
 
 	if len(message) == 0 {
@@ -687,9 +690,11 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 
 	// Run the pre-stop lifecycle hooks if applicable and if there is enough time to run it
 	if containerSpec.Lifecycle != nil && containerSpec.Lifecycle.PreStop != nil && gracePeriod > 0 {
+		//执行preStop并计算剩余优雅关闭时间
 		gracePeriod = gracePeriod - m.executePreStopHook(pod, containerID, containerSpec, gracePeriod)
 	}
 	// always give containers a minimal shutdown window to avoid unnecessary SIGKILLs
+	//如果gracePeriod过短,则延长该时间,尽量让容器优雅关闭
 	if gracePeriod < minimumGracePeriodInSeconds {
 		gracePeriod = minimumGracePeriodInSeconds
 	}
@@ -702,6 +707,7 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 	klog.V(2).InfoS("Killing container with a grace period", "pod", klog.KObj(pod), "podUID", pod.UID,
 		"containerName", containerName, "containerID", containerID.String(), "gracePeriod", gracePeriod)
 
+	//执行容器停止操作,通过GRPC调用cri接口
 	err := m.runtimeService.StopContainer(containerID.ID, gracePeriod)
 	if err != nil && !crierror.IsNotFound(err) {
 		klog.ErrorS(err, "Container termination failed with gracePeriod", "pod", klog.KObj(pod), "podUID", pod.UID,
