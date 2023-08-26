@@ -124,6 +124,7 @@ func (nm *NamespaceController) enqueueNamespace(obj interface{}) {
 
 	namespace := obj.(*v1.Namespace)
 	// don't queue if we aren't deleted
+	//namespace控制器只需要处理其删除动作即可,其他无需处理
 	if namespace.DeletionTimestamp == nil || namespace.DeletionTimestamp.IsZero() {
 		return
 	}
@@ -145,13 +146,16 @@ func (nm *NamespaceController) worker() {
 		}
 		defer nm.queue.Done(key)
 
+		//删除namespace下的所有资源
 		err := nm.syncNamespaceFromKey(key.(string))
 		if err == nil {
 			// no error, forget this entry and return
 			nm.queue.Forget(key)
 			return false
+
 		}
 
+		//未删除干净,加入队列,等待下一回删除
 		if estimate, ok := err.(*deletion.ResourcesRemainingError); ok {
 			t := estimate.Estimate/2 + 1
 			klog.V(4).Infof("Content remaining in namespace %s, waiting %d seconds", key, t)
