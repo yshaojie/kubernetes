@@ -72,6 +72,10 @@ type RESTGracefulDeleteStrategy interface {
 // where we set deletionTimestamp is pkg/registry/generic/registry/store.go.
 // This function is responsible for setting deletionTimestamp during gracefulDeletion,
 // other one for cascading deletions.
+// 做了以下事情
+// 1.校验删除时传入参数options是否合法
+// 2.给options初始化一些默认值
+// 3.更改待删除对象的meta值,比如DeletionTimestamp
 func BeforeDelete(strategy RESTDeleteStrategy, ctx context.Context, obj runtime.Object, options *metav1.DeleteOptions) (graceful, gracefulPending bool, err error) {
 	objectMeta, gvk, kerr := objectMetaAndKind(strategy, obj)
 	if kerr != nil {
@@ -82,6 +86,7 @@ func BeforeDelete(strategy RESTDeleteStrategy, ctx context.Context, obj runtime.
 	}
 	// Checking the Preconditions here to fail early. They'll be enforced later on when we actually do the deletion, too.
 	if options.Preconditions != nil {
+		//校验前置条件是否匹配，比如ResourceVersion，UID
 		if options.Preconditions.UID != nil && *options.Preconditions.UID != objectMeta.GetUID() {
 			return false, false, errors.NewConflict(schema.GroupResource{Group: gvk.Group, Resource: gvk.Kind}, objectMeta.GetName(), fmt.Errorf("the UID in the precondition (%s) does not match the UID in record (%s). The object might have been deleted and then recreated", *options.Preconditions.UID, objectMeta.GetUID()))
 		}
@@ -105,6 +110,7 @@ func BeforeDelete(strategy RESTDeleteStrategy, ctx context.Context, obj runtime.
 		return false, false, nil
 	}
 	// if the object is already being deleted, no need to update generation.
+	//已经处于删除状态中...
 	if objectMeta.GetDeletionTimestamp() != nil {
 		// if we are already being deleted, we may only shorten the deletion grace period
 		// this means the object was gracefully deleted previously but deletionGracePeriodSeconds was not set,
@@ -117,6 +123,8 @@ func BeforeDelete(strategy RESTDeleteStrategy, ctx context.Context, obj runtime.
 		// a resource was previously left in a state that was non-recoverable.  We
 		// check if the existing stored resource has a grace period as 0 and if so
 		// attempt to delete immediately in order to recover from this scenario.
+
+		//DeletionGracePeriodSeconds==0说明可以立即删除
 		if objectMeta.GetDeletionGracePeriodSeconds() == nil || *objectMeta.GetDeletionGracePeriodSeconds() == 0 {
 			return false, false, nil
 		}

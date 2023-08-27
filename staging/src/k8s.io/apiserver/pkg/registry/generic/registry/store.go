@@ -467,6 +467,8 @@ func (e *Store) Create(ctx context.Context, obj runtime.Object, createValidation
 // It checks if the new object has no finalizers,
 // the existing object's deletionTimestamp is set, and
 // the existing object's deletionGracePeriodSeconds is 0 or nil
+// 在更新一个对象时，是否应该删除，如果满足则删除该对象
+// 满足条件为 len(Finalizers)==0&&DeletionTimestamp!=nil && DeletionGracePeriodSeconds == 0
 func ShouldDeleteDuringUpdate(ctx context.Context, key string, obj, existing runtime.Object) bool {
 	newMeta, err := meta.Accessor(obj)
 	if err != nil {
@@ -866,11 +868,14 @@ func shouldDeleteDependents(ctx context.Context, e *Store, accessor metav1.Objec
 // The finalizers returned are intended to be handled by the garbage collector.
 // If garbage collection is disabled for the store, this function returns false
 // to ensure finalizers aren't set which will never be cleared.
+// 重新构建对象Finalizers的值，这里只添加了级联删除策略对应的Finalizer值
 func deletionFinalizersForGarbageCollection(ctx context.Context, e *Store, accessor metav1.Object, options *metav1.DeleteOptions) (bool, []string) {
 	if !e.EnableGarbageCollection {
 		return false, []string{}
 	}
+	//请求参数options是否设置级联删除策略cascade=orphan
 	shouldOrphan := shouldOrphanDependents(ctx, e, accessor, options)
+	//请求参数options是否设置级联删除策略cascade=foreground
 	shouldDeleteDependentInForeground := shouldDeleteDependents(ctx, e, accessor, options)
 	newFinalizers := []string{}
 
@@ -964,6 +969,7 @@ func (e *Store) updateForGracefulDeletionAndFinalizers(ctx context.Context, name
 			if err != nil {
 				return nil, err
 			}
+			//重新构建对象Finalizers的值，这里只添加了级联删除策略对应的Finalizer值
 			needsUpdate, newFinalizers := deletionFinalizersForGarbageCollection(ctx, e, existingAccessor, options)
 			if needsUpdate {
 				existingAccessor.SetFinalizers(newFinalizers)
@@ -1041,6 +1047,8 @@ func (e *Store) Delete(ctx context.Context, name string, deleteValidation rest.V
 		preconditions.UID = options.Preconditions.UID
 		preconditions.ResourceVersion = options.Preconditions.ResourceVersion
 	}
+	//graceful:需要优雅删除
+	//pendingGraceful:正在进行优雅删除
 	graceful, pendingGraceful, err := rest.BeforeDelete(e.DeleteStrategy, ctx, obj, options)
 	if err != nil {
 		return nil, false, err
@@ -1065,6 +1073,7 @@ func (e *Store) Delete(ctx context.Context, name string, deleteValidation rest.V
 	shouldUpdateFinalizers, _ := deletionFinalizersForGarbageCollection(ctx, e, accessor, options)
 	// TODO: remove the check, because we support no-op updates now.
 	if graceful || pendingFinalizers || shouldUpdateFinalizers {
+		//更新Graceful和Finalizers的值
 		err, ignoreNotFound, deleteImmediately, out, lastExisting = e.updateForGracefulDeletionAndFinalizers(ctx, name, key, options, preconditions, deleteValidation, obj)
 		// Update the preconditions.ResourceVersion if set since we updated the object.
 		if err == nil && deleteImmediately && preconditions.ResourceVersion != nil {
@@ -1097,6 +1106,7 @@ func (e *Store) Delete(ctx context.Context, name string, deleteValidation rest.V
 	// delete immediately, or no graceful deletion supported
 	klog.V(6).InfoS("Going to delete object from registry", "object", klog.KRef(genericapirequest.NamespaceValue(ctx), name))
 	out = e.NewFunc()
+	//调用etcd进行删除
 	if err := e.Storage.Delete(ctx, key, out, &preconditions, storage.ValidateObjectFunc(deleteValidation), dryrun.IsDryRun(options.DryRun), nil); err != nil {
 		// Please refer to the place where we set ignoreNotFound for the reason
 		// why we ignore the NotFound error .

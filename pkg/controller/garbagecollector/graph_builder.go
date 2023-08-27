@@ -588,6 +588,7 @@ func (gb *GraphBuilder) processTransitions(oldObj interface{}, newAccessor metav
 		gb.attemptToOrphan.Add(n)
 		return
 	}
+	//已经处于删除状态（DeletionTimestamp！= null）并且没有foregroundDeletion Finalizer
 	if startsWaitingForDependentsDeleted(oldObj, newAccessor) {
 		klog.V(2).Infof("add %s to the attemptToDelete, because it's waiting for its dependents to be deleted", n.identity)
 		// if the n is added as a "virtual" node, its deletingDependents field is not properly set, so always set it here.
@@ -618,6 +619,7 @@ func identityFromEvent(event *event, accessor metav1.Object) objectReference {
 
 // Dequeueing an event from graphChanges, updating graph, populating dirty_queue.
 func (gb *GraphBuilder) processGraphChanges() bool {
+	//发生变化的节点
 	item, quit := gb.graphChanges.Get()
 	if quit {
 		return false
