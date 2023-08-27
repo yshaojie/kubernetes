@@ -164,6 +164,7 @@ func (r *REST) Delete(ctx context.Context, name string, deleteValidation rest.Va
 
 	// upon first request to delete, we switch the phase to start namespace termination
 	// TODO: enhance graceful deletion's calls to DeleteStrategy to allow phase change and finalizer patterns
+	//设置删除状态，如DeletionTimestamp，Status.Phase
 	if namespace.DeletionTimestamp.IsZero() {
 		key, err := r.store.KeyFunc(ctx, name)
 		if err != nil {
@@ -187,13 +188,16 @@ func (r *REST) Delete(ctx context.Context, name string, deleteValidation rest.Va
 				// Set the deletion timestamp if needed
 				if existingNamespace.DeletionTimestamp.IsZero() {
 					now := metav1.Now()
+					//设置DeletionTimestamp为当前时间
 					existingNamespace.DeletionTimestamp = &now
 				}
 				// Set the namespace phase to terminating, if needed
 				if existingNamespace.Status.Phase != api.NamespaceTerminating {
+					//设置namespace当前阶段为NamespaceTerminating
 					existingNamespace.Status.Phase = api.NamespaceTerminating
 				}
 
+				//重新构建finalizers，根据传过来的options和当前拥有的finalizers做一个合并，以option为准
 				// the current finalizers which are on namespace
 				currentFinalizers := map[string]bool{}
 				for _, f := range existingNamespace.Finalizers {
