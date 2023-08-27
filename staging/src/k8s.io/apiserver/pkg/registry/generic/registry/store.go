@@ -548,6 +548,7 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 			return nil, nil, err
 		}
 		if existingResourceVersion == 0 {
+			//不允许更新时不存在则创建策略
 			if !e.UpdateStrategy.AllowCreateOnUpdate() && !forceAllowCreate {
 				return nil, nil, apierrors.NewNotFound(qualifiedResource, name)
 			}
@@ -569,6 +570,7 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 		}
 		doUnconditionalUpdate := newResourceVersion == 0 && e.UpdateStrategy.AllowUnconditionalUpdate()
 
+		//existingResourceVersion == 0说明之前不存在，需要创建
 		if existingResourceVersion == 0 {
 			// Init metadata as early as possible.
 			if objectMeta, err := meta.Accessor(obj); err != nil {
@@ -665,6 +667,8 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 			}
 		}
 		// Check the default delete-during-update conditions, and store-specific conditions if provided
+		//检查是否达到删除该对象条件
+		//满足条件为 len(Finalizers)==0&&DeletionTimestamp!=nil && DeletionGracePeriodSeconds == 0
 		if ShouldDeleteDuringUpdate(ctx, key, obj, existing) &&
 			(e.ShouldDeleteDuringUpdate == nil || e.ShouldDeleteDuringUpdate(ctx, key, obj, existing)) {
 			deleteObj = obj
@@ -690,6 +694,7 @@ func (e *Store) Update(ctx context.Context, name string, objInfo rest.UpdatedObj
 	if err != nil {
 		// delete the object
 		if err == errEmptiedFinalizers {
+			//执行删除操作，这会将对象从etcd删除
 			return e.deleteWithoutFinalizers(ctx, name, key, deleteObj, storagePreconditions, newDeleteOptionsFromUpdateOptions(options))
 		}
 		if creating {
