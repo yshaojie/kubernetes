@@ -149,9 +149,11 @@ func (c *controller) Run(stopCh <-chan struct{}) {
 	c.reflectorMutex.Unlock()
 
 	var wg wait.Group
-
+	//启动List And Watch
 	wg.StartWithChannel(stopCh, r.Run)
 
+	//从FIFO里面pop元素，调用ResourceEventHandler
+	//具体参考staging/src/k8s.io/client-go/tools/cache/controller.go:490 方法processDeltas
 	wait.Until(c.processLoop, time.Second, stopCh)
 	wg.Wait()
 }
@@ -428,9 +430,12 @@ func processDeltas(
 		switch d.Type {
 		case Sync, Replaced, Added, Updated:
 			if old, exists, err := clientState.Get(obj); err == nil && exists {
+				//存入store，用于get请求 clientState就是staging/src/k8s.io/client-go/tools/cache/store.go:139
+				//cache.cache内部就是一个ThreadSafeStore
 				if err := clientState.Update(obj); err != nil {
 					return err
 				}
+				//调用EventHandler
 				handler.OnUpdate(old, obj)
 			} else {
 				if err := clientState.Add(obj); err != nil {

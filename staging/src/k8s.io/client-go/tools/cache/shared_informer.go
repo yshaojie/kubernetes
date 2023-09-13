@@ -19,6 +19,7 @@ package cache
 import (
 	"errors"
 	"fmt"
+	"k8s.io/klog/v2"
 	"sync"
 	"time"
 
@@ -28,8 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/buffer"
 	"k8s.io/utils/clock"
-
-	"k8s.io/klog/v2"
 )
 
 // SharedInformer provides eventually consistent linkage of its
@@ -394,6 +393,7 @@ func (s *sharedIndexInformer) SetTransform(handler TransformFunc) error {
 	return nil
 }
 
+// Run 启动informer
 func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) {
 	defer utilruntime.HandleCrash()
 

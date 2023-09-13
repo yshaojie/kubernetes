@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"k8s.io/klog/v2"
 	"math/rand"
 	"reflect"
 	"sync"
@@ -38,7 +39,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/pager"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
 	"k8s.io/utils/trace"
 )
@@ -219,6 +219,8 @@ var internalPackages = []string{"client-go/tools/cache/"}
 // Run will exit when stopCh is closed.
 func (r *Reflector) Run(stopCh <-chan struct{}) {
 	klog.V(3).Infof("Starting reflector %s (%s) from %s", r.expectedTypeName, r.resyncPeriod, r.name)
+	//一直运行ListAndWatch,直到stopCh关闭
+	//需要注意的是,如果ListAndWatch报错，那么会重新执行ListAndWatch方法
 	wait.BackoffUntil(func() {
 		if err := r.ListAndWatch(stopCh); err != nil {
 			r.watchErrorHandler(r, err)
@@ -255,7 +257,7 @@ func (r *Reflector) resyncChan() (<-chan time.Time, func() bool) {
 // It returns error if ListAndWatch didn't even try to initialize watch.
 func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 	klog.V(3).Infof("Listing and watching %v from %s", r.expectedTypeName, r.name)
-
+	//启动List,拉取全量Resource
 	err := r.list(stopCh)
 	if err != nil {
 		return err
@@ -264,6 +266,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 	resyncerrc := make(chan error, 1)
 	cancelCh := make(chan struct{})
 	defer close(cancelCh)
+	//执行resync逻辑,即定时把store里面的数据放入FIFO队列
 	go func() {
 		resyncCh, cleanup := r.resyncChan()
 		defer func() {
@@ -312,6 +315,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 
 		// start the clock before sending the request, since some proxies won't flush headers until after the first watch event is sent
 		start := r.clock.Now()
+		//执行Watch请求,获取资源增量变化
 		w, err := r.listerWatcher.Watch(options)
 		if err != nil {
 			// If this is "connection refused" error, it means that most likely apiserver is not responsive.
@@ -325,7 +329,7 @@ func (r *Reflector) ListAndWatch(stopCh <-chan struct{}) error {
 			}
 			return err
 		}
-
+		//处理获取到的增量数据,添加到FIFO队列里面
 		err = watchHandler(start, w, r.store, r.expectedType, r.expectedGVK, r.name, r.expectedTypeName, r.setLastSyncResourceVersion, r.clock, resyncerrc, stopCh)
 		retry.After(err)
 		if err != nil {
@@ -451,6 +455,7 @@ func (r *Reflector) list(stopCh <-chan struct{}) error {
 		return fmt.Errorf("unable to understand list result %#v (%v)", list, err)
 	}
 	initTrace.Step("Objects extracted")
+	//将list查询到的items添加到FIFO队列
 	if err := r.syncWith(items, resourceVersion); err != nil {
 		return fmt.Errorf("unable to sync list result: %v", err)
 	}
@@ -466,6 +471,7 @@ func (r *Reflector) syncWith(items []runtime.Object, resourceVersion string) err
 	for _, item := range items {
 		found = append(found, item)
 	}
+	//store就是一个FIFO，添加到FIFO队列
 	return r.store.Replace(found, resourceVersion)
 }
 
@@ -522,6 +528,7 @@ loop:
 			resourceVersion := meta.GetResourceVersion()
 			switch event.Type {
 			case watch.Added:
+				//store就是FIFO队列
 				err := store.Add(event.Object)
 				if err != nil {
 					utilruntime.HandleError(fmt.Errorf("%s: unable to add watch event object (%#v) to store: %v", name, event.Object, err))
