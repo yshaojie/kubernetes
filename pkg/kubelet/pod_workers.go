@@ -559,6 +559,7 @@ func (p *podWorkers) UpdatePod(options UpdatePodOptions) {
 	// the terminating part of the lifecycle
 	pod := options.Pod
 	var isRuntimePod bool
+	// options.Pod == nil && options.RunningPod != nil 则options.Pod = options.RunningPod
 	if options.RunningPod != nil {
 		if options.Pod == nil {
 			pod = options.RunningPod.ToAPIPod()
@@ -593,6 +594,7 @@ func (p *podWorkers) UpdatePod(options UpdatePodOptions) {
 			// check to see if the pod is not running and the pod is terminal.
 			// If this succeeds then record in the podWorker that it is terminated.
 			if statusCache, err := p.podCache.Get(pod.UID); err == nil {
+				//所有容器不处于Running状态即为Terminal
 				if isPodStatusCacheTerminal(statusCache) {
 					status = &podSyncStatus{
 						terminatedAt:       now,
@@ -772,6 +774,7 @@ func (p *podWorkers) UpdatePod(options UpdatePodOptions) {
 	}
 
 	// always sync the most recent data
+	//为了提高性能，仅保留最新的更新事件，这样中间产生的同步事件就不用处理了
 	p.lastUndeliveredWorkUpdate[pod.UID] = work
 
 	if (becameTerminating || wasGracePeriodShortened) && status.cancelFn != nil {
@@ -904,6 +907,7 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan podWork) {
 
 		klog.V(4).InfoS("Processing pod event", "pod", klog.KObj(pod), "podUID", pod.UID, "updateType", update.WorkType)
 		var isTerminal bool
+		//1. podWork.WorkType进行业务处理
 		err := func() error {
 			// The worker is responsible for ensuring the sync method sees the appropriate
 			// status updates on resyncs (the result of the last sync), transitions to
@@ -938,6 +942,7 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan podWork) {
 			// Take the appropriate action (illegal phases are prevented by UpdatePod)
 			switch {
 			case update.WorkType == TerminatedPodWork:
+				//关闭Pod后，继续处理后续清理工作，比如volume，secret，configmap绑定等
 				err = p.syncTerminatedPodFn(ctx, pod, status)
 
 			case update.WorkType == TerminatingPodWork:
@@ -946,7 +951,7 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan podWork) {
 					gracePeriod = opt.PodTerminationGracePeriodSecondsOverride
 				}
 				podStatusFn := p.acknowledgeTerminating(pod)
-
+				//处理Pod关闭逻辑
 				err = p.syncTerminatingPodFn(ctx, pod, status, update.Options.RunningPod, gracePeriod, podStatusFn)
 
 			default:
@@ -958,6 +963,7 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan podWork) {
 			return err
 		}()
 
+		//2.根据（1）的结果，进行下一步处理
 		var phaseTransition bool
 		switch {
 		case err == context.Canceled:
@@ -966,10 +972,13 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan podWork) {
 
 		case err != nil:
 			// we will queue a retry
+
 			klog.ErrorS(err, "Error syncing pod, skipping", "pod", klog.KObj(pod), "podUID", pod.UID)
 
 		case update.WorkType == TerminatedPodWork:
 			// we can shut down the worker
+			// pod资源已经全部释放，清除kubelet里面创建的Pod相关信息，
+			// 如podWorkers.lastUndeliveredWorkUpdate里面保存的Pod信息
 			p.completeTerminated(pod)
 			if start := update.Options.StartTime; !start.IsZero() {
 				metrics.PodWorkerDuration.WithLabelValues("terminated").Observe(metrics.SinceInSeconds(start))
@@ -979,6 +988,8 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan podWork) {
 
 		case update.WorkType == TerminatingPodWork:
 			// pods that don't exist in config don't need to be terminated, garbage collection will cover them
+			// Pod执行关闭动作已经完成，可以进一步清理动作
+			//这里通过更新podWorkers.lastUndeliveredWorkUpdate来触发下一步动作
 			if update.Options.RunningPod != nil {
 				p.completeTerminatingRuntimePod(pod)
 				if start := update.Options.StartTime; !start.IsZero() {
@@ -994,6 +1005,7 @@ func (p *podWorkers) managePodLoop(podUpdates <-chan podWork) {
 		case isTerminal:
 			// if syncPod indicated we are now terminal, set the appropriate pod status to move to terminating
 			klog.V(4).InfoS("Pod is terminal", "pod", klog.KObj(pod), "podUID", pod.UID, "updateType", update.WorkType)
+			// 触发关闭pod动作
 			p.completeSync(pod)
 			phaseTransition = true
 		}
@@ -1079,6 +1091,7 @@ func (p *podWorkers) completeTerminating(pod *v1.Pod) {
 		status.statusPostTerminating = nil
 	}
 
+	// 通过更新lastUndeliveredWorkUpdate来触发清理Pod下一步动作
 	p.lastUndeliveredWorkUpdate[pod.UID] = podWork{
 		WorkType: TerminatedPodWork,
 		Options: UpdatePodOptions{

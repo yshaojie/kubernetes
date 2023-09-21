@@ -689,6 +689,9 @@ func (m *kubeGenericRuntimeManager) killContainer(pod *v1.Pod, containerID kubec
 	}
 
 	// Run the pre-stop lifecycle hooks if applicable and if there is enough time to run it
+	// 这里表明，preStop不一定会执行，只有gracePeriod>0才会执行
+	// 如果 pod.Spec.TerminationGracePeriodSeconds 或者 containerSpec.StartupProbe.TerminationGracePeriodSeconds
+	// 或者containerSpec.LivenessProbe.TerminationGracePeriodSeconds设置为0都有可能造成preStop不执行
 	if containerSpec.Lifecycle != nil && containerSpec.Lifecycle.PreStop != nil && gracePeriod > 0 {
 		//执行preStop并计算剩余优雅关闭时间
 		gracePeriod = gracePeriod - m.executePreStopHook(pod, containerID, containerSpec, gracePeriod)
@@ -726,6 +729,8 @@ func (m *kubeGenericRuntimeManager) killContainersWithSyncResult(pod *v1.Pod, ru
 	wg := sync.WaitGroup{}
 
 	wg.Add(len(runningPod.Containers))
+	//遍历所有Pod容器，并关闭
+	// 这里采用协程并行关闭，所以不能保证容器关闭顺序
 	for _, container := range runningPod.Containers {
 		go func(container *kubecontainer.Container) {
 			defer utilruntime.HandleCrash()

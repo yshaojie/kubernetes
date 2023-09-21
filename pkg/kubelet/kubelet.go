@@ -1415,6 +1415,7 @@ func (kl *Kubelet) initializeRuntimeDependentModules() {
 }
 
 // Run starts the kubelet reacting to config updates
+// 启动kubelet
 func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
 	if kl.logServer == nil {
 		kl.logServer = http.StripPrefix("/logs/", http.FileServer(http.Dir("/var/log/")))
@@ -1872,15 +1873,18 @@ func (kl *Kubelet) syncTerminatedPod(ctx context.Context, pod *v1.Pod, podStatus
 
 	// volumes are unmounted after the pod worker reports ShouldPodRuntimeBeRemoved (which is satisfied
 	// before syncTerminatedPod is invoked)
+	// 1.解除volume挂载
 	if err := kl.volumeManager.WaitForUnmount(pod); err != nil {
 		return err
 	}
 	klog.V(4).InfoS("Pod termination unmounted volumes", "pod", klog.KObj(pod), "podUID", pod.UID)
 
 	// After volume unmount is complete, let the secret and configmap managers know we're done with this pod
+	// 2.注销Pod依赖的secret
 	if kl.secretManager != nil {
 		kl.secretManager.UnregisterPod(pod)
 	}
+	// 3.注销Pod依赖的ConfigMap
 	if kl.configMapManager != nil {
 		kl.configMapManager.UnregisterPod(pod)
 	}
@@ -1890,6 +1894,7 @@ func (kl *Kubelet) syncTerminatedPod(ctx context.Context, pod *v1.Pod, podStatus
 	// physically deleted.
 
 	// remove any cgroups in the hierarchy for pods that are no longer running.
+	// 4.清除所属Pod的cgroups
 	if kl.cgroupsPerQOS {
 		pcm := kl.containerManager.NewPodContainerManager()
 		name, _ := pcm.GetPodContainerName(pod)
@@ -1899,6 +1904,7 @@ func (kl *Kubelet) syncTerminatedPod(ctx context.Context, pod *v1.Pod, podStatus
 		klog.V(4).InfoS("Pod termination removed cgroups", "pod", klog.KObj(pod), "podUID", pod.UID)
 	}
 
+	// 5.释放所属Pod的namespace
 	kl.usernsManager.Release(pod.UID)
 
 	// mark the final pod status
@@ -2143,6 +2149,7 @@ func (kl *Kubelet) syncLoopIteration(configCh <-chan kubetypes.PodUpdate, handle
 		}
 	case <-syncCh:
 		// Sync pods waiting for sync
+		// 定时同步，这里要同步的只是workQueue里面的pod而不是全部
 		podsToSync := kl.getPodsToSync()
 		if len(podsToSync) == 0 {
 			break
