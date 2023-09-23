@@ -84,6 +84,7 @@ func NewEndpointController(podInformer coreinformers.PodInformer, serviceInforme
 		workerLoopPeriod: time.Second,
 	}
 
+	// 所有资源变化都检索到其对应的service资源进行同步
 	serviceInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: e.onServiceUpdate,
 		UpdateFunc: func(old, cur interface{}) {
@@ -187,6 +188,7 @@ func (e *Controller) Run(ctx context.Context, workers int) {
 	}
 
 	for i := 0; i < workers; i++ {
+		// 启动endpoint同步
 		go wait.UntilWithContext(ctx, e.worker, e.workerLoopPeriod)
 	}
 
@@ -244,6 +246,7 @@ func podToEndpointAddressForService(svc *v1.Service, pod *v1.Pod) (*v1.EndpointA
 	}
 
 	// find an ip that matches the family
+	//找到匹配服务对应的协议Ip，比如ipv4，ipv6
 	for _, podIP := range pod.Status.PodIPs {
 		if (ipFamily == v1.IPv6Protocol) == utilnet.IsIPv6String(podIP.IP) {
 			endpointIP = podIP.IP
@@ -399,6 +402,7 @@ func (e *Controller) syncService(ctx context.Context, key string) error {
 	}
 
 	klog.V(5).Infof("About to update endpoints for service %q", key)
+	// 获取service关联的Pod
 	pods, err := e.podLister.Pods(service.Namespace).List(labels.Set(service.Spec.Selector).AsSelectorPreValidated())
 	if err != nil {
 		// Since we're getting stuff from a local cache, it is
@@ -422,6 +426,7 @@ func (e *Controller) syncService(ctx context.Context, key string) error {
 			continue
 		}
 
+		// 构建Pod对应service的EndpointAddress
 		ep, err := podToEndpointAddressForService(service, pod)
 		if err != nil {
 			// this will happen, if the cluster runs with some nodes configured as dual stack and some as not
@@ -526,6 +531,7 @@ func (e *Controller) syncService(ctx context.Context, key string) error {
 	}
 
 	klog.V(4).Infof("Update endpoints for %v/%v, ready: %d not ready: %d", service.Namespace, service.Name, totalReadyEps, totalNotReadyEps)
+	// 更新Endpoint
 	if createEndpoints {
 		// No previous endpoints, create them
 		_, err = e.client.CoreV1().Endpoints(service.Namespace).Create(ctx, newEndpoints, metav1.CreateOptions{})
@@ -600,6 +606,7 @@ func addEndpointSubset(subsets []v1.EndpointSubset, pod *v1.Pod, epa v1.Endpoint
 	if epp != nil {
 		ports = append(ports, *epp)
 	}
+	// 容忍未就绪Pod或者Pod已就绪
 	if tolerateUnreadyEndpoints || podutil.IsPodReady(pod) {
 		subsets = append(subsets, v1.EndpointSubset{
 			Addresses: []v1.EndpointAddress{epa},
