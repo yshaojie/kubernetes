@@ -97,6 +97,8 @@ type Type struct {
 
 type empty struct{}
 type t interface{}
+
+// 实现set结构
 type set map[t]empty
 
 func (s set) has(item t) bool {
@@ -123,6 +125,7 @@ func (q *Type) Add(item interface{}) {
 	if q.shuttingDown {
 		return
 	}
+	//已在queue中，则不再次入queue，这样能够提高性能
 	if q.dirty.has(item) {
 		return
 	}
@@ -130,11 +133,13 @@ func (q *Type) Add(item interface{}) {
 	q.metrics.add(item)
 
 	q.dirty.insert(item)
+	//该item正在处理，不入队列
 	if q.processing.has(item) {
 		return
 	}
 
 	q.queue = append(q.queue, item)
+	// 唤醒一个消费端
 	q.cond.Signal()
 }
 
@@ -153,6 +158,7 @@ func (q *Type) Len() int {
 func (q *Type) Get() (item interface{}, shutdown bool) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
+	// 没有数据，则等待生产端唤醒
 	for len(q.queue) == 0 && !q.shuttingDown {
 		q.cond.Wait()
 	}
@@ -167,8 +173,9 @@ func (q *Type) Get() (item interface{}, shutdown bool) {
 	q.queue = q.queue[1:]
 
 	q.metrics.get(item)
-
+	// 将元素添加到正在处理set
 	q.processing.insert(item)
+	// 从dirty删除，这样该item再次入队列
 	q.dirty.delete(item)
 
 	return item, false
@@ -182,9 +189,11 @@ func (q *Type) Done(item interface{}) {
 	defer q.cond.L.Unlock()
 
 	q.metrics.done(item)
-
+	// 该item已处理完，从processing中删除
 	q.processing.delete(item)
 	if q.dirty.has(item) {
+		// dirty如果存在该item，说明在该item处理过程中，又再次入队列
+		//这时可以重新入队列，这样就保证了一个item不会被同时处理多次
 		q.queue = append(q.queue, item)
 		q.cond.Signal()
 	} else if q.processing.len() == 0 {

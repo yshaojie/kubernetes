@@ -109,6 +109,7 @@ type waitFor struct {
 // it has been removed from the queue and placed at index Len()-1 by
 // container/heap. Push adds an item at index Len(), and container/heap
 // percolates it into the correct location.
+// 根据waitFor.readyAt的优先队列
 type waitForPriorityQueue []*waitFor
 
 func (pq waitForPriorityQueue) Len() int {
@@ -210,10 +211,11 @@ func (q *delayingType) waitingLoop() {
 		// Add ready entries
 		for waitingForQueue.Len() > 0 {
 			entry := waitingForQueue.Peek().(*waitFor)
+			//还未到入队列时间
 			if entry.readyAt.After(now) {
 				break
 			}
-
+			// 已经到了延迟时间，则将元素放入队列
 			entry = heap.Pop(waitingForQueue).(*waitFor)
 			q.Add(entry.data)
 			delete(waitingEntryByData, entry.data)
