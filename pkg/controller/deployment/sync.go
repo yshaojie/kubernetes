@@ -141,6 +141,7 @@ func (dc *DeploymentController) getNewReplicaSet(ctx context.Context, d *apps.De
 	// Calculate the max revision number among all old RSes
 	maxOldRevision := deploymentutil.MaxRevision(oldRSs)
 	// Calculate revision number for this new replica set
+	// 滚动更新版本
 	newRevision := strconv.FormatInt(maxOldRevision+1, 10)
 
 	// Latest replica set exists. We need to sync its annotations (includes copying all but
@@ -208,6 +209,7 @@ func (dc *DeploymentController) getNewReplicaSet(ctx context.Context, d *apps.De
 		},
 	}
 	allRSs := append(oldRSs, &newRS)
+	// newRS.Spec.Replicas=0
 	newReplicasCount, err := deploymentutil.NewRSNewReplicas(d, allRSs, &newRS)
 	if err != nil {
 		return nil, err

@@ -610,8 +610,10 @@ func EqualIgnoreHash(template1, template2 *v1.PodTemplateSpec) bool {
 
 // FindNewReplicaSet returns the new RS this given deployment targets (the one with the same pod template).
 func FindNewReplicaSet(deployment *apps.Deployment, rsList []*apps.ReplicaSet) *apps.ReplicaSet {
+	// 按照创建时间倒序
 	sort.Sort(controller.ReplicaSetsByCreationTimestamp(rsList))
 	for i := range rsList {
+		//找到最新Spec.Template没有变化的RS，否则返回nil
 		if EqualIgnoreHash(&rsList[i].Spec.Template, &deployment.Spec.Template) {
 			// In rare cases, such as after cluster upgrades, Deployment may end up with
 			// having more than one new ReplicaSets that have the same template as its template,
@@ -790,6 +792,7 @@ func NewRSNewReplicas(deployment *apps.Deployment, allRSs []*apps.ReplicaSet, ne
 		}
 		// Find the total number of pods
 		currentPodCount := GetReplicaCountForReplicaSets(allRSs)
+		// maxTotalPods = deployment.Spec.Replicas + 上浮最大数
 		maxTotalPods := *(deployment.Spec.Replicas) + int32(maxSurge)
 		if currentPodCount >= maxTotalPods {
 			// Cannot scale up.

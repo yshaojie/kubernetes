@@ -206,6 +206,7 @@ func (dc *DeploymentController) deleteDeployment(obj interface{}) {
 func (dc *DeploymentController) addReplicaSet(obj interface{}) {
 	rs := obj.(*apps.ReplicaSet)
 
+	// rs正在删除
 	if rs.DeletionTimestamp != nil {
 		// On a restart of the controller manager, it's possible for an object to
 		// show up in a state that is already pending deletion.
@@ -226,6 +227,7 @@ func (dc *DeploymentController) addReplicaSet(obj interface{}) {
 
 	// Otherwise, it's an orphan. Get a list of all matching Deployments and sync
 	// them to see if anyone wants to adopt it.
+	// 处理孤儿RS
 	ds := dc.getDeploymentsForReplicaSet(rs)
 	if len(ds) == 0 {
 		return
@@ -272,9 +274,11 @@ func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 	curControllerRef := metav1.GetControllerOf(curRS)
 	oldControllerRef := metav1.GetControllerOf(oldRS)
 	controllerRefChanged := !reflect.DeepEqual(curControllerRef, oldControllerRef)
+	// rs的controllerRef发生变化，那么需要触发oldControllerRef的同步
 	if controllerRefChanged && oldControllerRef != nil {
 		// The ControllerRef was changed. Sync the old controller, if any.
 		if d := dc.resolveControllerRef(oldRS.Namespace, oldControllerRef); d != nil {
+			// old Deployment 写入队列
 			dc.enqueueDeployment(d)
 		}
 	}
@@ -286,6 +290,7 @@ func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 			return
 		}
 		klog.V(4).InfoS("ReplicaSet updated", "replicaSet", klog.KObj(curRS))
+		// ts 的当前 Deployment入队列
 		dc.enqueueDeployment(d)
 		return
 	}
@@ -293,6 +298,7 @@ func (dc *DeploymentController) updateReplicaSet(old, cur interface{}) {
 	// Otherwise, it's an orphan. If anything changed, sync matching controllers
 	// to see if anyone wants to adopt it now.
 	labelChanged := !reflect.DeepEqual(curRS.Labels, oldRS.Labels)
+	// 孤儿RS，通过selector获取其对应的deployment，并入队列
 	if labelChanged || controllerRefChanged {
 		ds := dc.getDeploymentsForReplicaSet(curRS)
 		if len(ds) == 0 {
@@ -362,6 +368,7 @@ func (dc *DeploymentController) deletePod(obj interface{}) {
 		}
 	}
 	klog.V(4).InfoS("Pod deleted", "pod", klog.KObj(pod))
+	// 更新策略为Recreate的情况下，当deployment所属的pod数量为空时，触发deployment更新
 	if d := dc.getDeploymentForPod(pod); d != nil && d.Spec.Strategy.Type == apps.RecreateDeploymentStrategyType {
 		// Sync if this Deployment now has no more Pods.
 		rsList, err := util.ListReplicaSets(d, util.RsListFromClient(dc.client.AppsV1()))
@@ -475,7 +482,7 @@ func (dc *DeploymentController) processNextWorkItem(ctx context.Context) bool {
 		return false
 	}
 	defer dc.queue.Done(key)
-
+	// 执行deployment同步逻辑
 	err := dc.syncHandler(ctx, key.(string))
 	dc.handleErr(err, key)
 
@@ -619,11 +626,13 @@ func (dc *DeploymentController) syncDeployment(ctx context.Context, key string) 
 	//
 	// * check if a Pod is labeled correctly with the pod-template-hash label.
 	// * check that no old Pods are running in the middle of Recreate Deployments.
+	// 返回 RS.UID-> []Pod
 	podMap, err := dc.getPodMapForDeployment(d, rsList)
 	if err != nil {
 		return err
 	}
 
+	// Deployment正在被删除
 	if d.DeletionTimestamp != nil {
 		return dc.syncStatusOnly(ctx, d, rsList)
 	}
@@ -642,10 +651,12 @@ func (dc *DeploymentController) syncDeployment(ctx context.Context, key string) 
 	// rollback is not re-entrant in case the underlying replica sets are updated with a new
 	// revision so we should ensure that we won't proceed to update replica sets until we
 	// make sure that the deployment has cleaned up its rollback spec in subsequent enqueues.
+	// 执行回滚
 	if getRollbackTo(d) != nil {
 		return dc.rollback(ctx, d, rsList)
 	}
 
+	// 伸缩请求
 	scalingEvent, err := dc.isScalingEvent(ctx, d, rsList)
 	if err != nil {
 		return err
@@ -658,6 +669,7 @@ func (dc *DeploymentController) syncDeployment(ctx context.Context, key string) 
 	case apps.RecreateDeploymentStrategyType:
 		return dc.rolloutRecreate(ctx, d, rsList, podMap)
 	case apps.RollingUpdateDeploymentStrategyType:
+		// 滚动更新
 		return dc.rolloutRolling(ctx, d, rsList)
 	}
 	return fmt.Errorf("unexpected deployment strategy type: %s", d.Spec.Strategy.Type)

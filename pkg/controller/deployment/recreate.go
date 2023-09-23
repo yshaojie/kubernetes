@@ -36,6 +36,7 @@ func (dc *DeploymentController) rolloutRecreate(ctx context.Context, d *apps.Dep
 	activeOldRSs := controller.FilterActiveReplicaSets(oldRSs)
 
 	// scale down old replica sets.
+	// 将所有的Old RS的副本数都改为0
 	scaledDown, err := dc.scaleDownOldReplicaSetsForRecreate(ctx, activeOldRSs, d)
 	if err != nil {
 		return err
@@ -83,6 +84,7 @@ func (dc *DeploymentController) scaleDownOldReplicaSetsForRecreate(ctx context.C
 		if *(rs.Spec.Replicas) == 0 {
 			continue
 		}
+		// 将RS的副本数改为0
 		scaledRS, updatedRS, err := dc.scaleReplicaSetAndRecordEvent(ctx, rs, 0, deployment)
 		if err != nil {
 			return false, err

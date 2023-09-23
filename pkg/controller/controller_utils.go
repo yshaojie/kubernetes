@@ -949,6 +949,7 @@ func IsPodActive(p *v1.Pod) bool {
 }
 
 // FilterActiveReplicaSets returns replica sets that have (or at least ought to have) pods.
+// 选取rs.Spec.Replicas>0的RS
 func FilterActiveReplicaSets(replicaSets []*apps.ReplicaSet) []*apps.ReplicaSet {
 	activeFilter := func(rs *apps.ReplicaSet) bool {
 		return rs != nil && *(rs.Spec.Replicas) > 0
