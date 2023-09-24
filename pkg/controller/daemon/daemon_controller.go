@@ -527,6 +527,7 @@ func (dsc *DaemonSetsController) addPod(obj interface{}) {
 	// them to see if anyone wants to adopt it.
 	// DO NOT observe creation because no controller should be waiting for an
 	// orphan.
+	// 孤儿Pod，那么就通过selector找出跟该Pod匹配的DaemonSet
 	dss := dsc.getDaemonSetsForPod(pod)
 	if len(dss) == 0 {
 		return
@@ -649,6 +650,7 @@ func (dsc *DaemonSetsController) addNode(obj interface{}) {
 	node := obj.(*v1.Node)
 	for _, ds := range dsList {
 		if shouldRun, _ := NodeShouldRunDaemonPod(node, ds); shouldRun {
+			// 在该节点上运行的DaemonSet都加入到queue
 			dsc.enqueueDaemonSet(ds)
 		}
 	}
@@ -1172,6 +1174,7 @@ func (dsc *DaemonSetsController) updateDaemonSetStatus(ctx context.Context, ds *
 	return nil
 }
 
+// 执行同步DaemonSet逻辑
 func (dsc *DaemonSetsController) syncDaemonSet(ctx context.Context, key string) error {
 	startTime := dsc.failedPodsBackoff.Clock.Now()
 
