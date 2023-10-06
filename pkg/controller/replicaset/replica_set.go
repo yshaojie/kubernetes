@@ -681,7 +681,7 @@ func (rsc *ReplicaSetController) syncReplicaSet(ctx context.Context, key string)
 	if err != nil {
 		return err
 	}
-	// 是否需要同步，只有上次的同步操作完成，才能进行下次同步
+	// 是否需要同步，只有上次的同步操作完成或者已过期，才能进行下次同步
 	rsNeedsSync := rsc.expectations.SatisfiedExpectations(key)
 	selector, err := metav1.LabelSelectorAsSelector(rs.Spec.Selector)
 	if err != nil {
