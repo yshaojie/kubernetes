@@ -653,6 +653,7 @@ func (dc *DisruptionController) processNextStalePodDisruptionWorkItem(ctx contex
 	return true
 }
 
+// 同步PodDisruptionBudg
 func (dc *DisruptionController) sync(ctx context.Context, key string) error {
 	startTime := dc.clock.Now()
 	defer func() {
@@ -695,7 +696,7 @@ func (dc *DisruptionController) trySync(ctx context.Context, pdb *policy.PodDisr
 	if len(pods) == 0 {
 		dc.recorder.Eventf(pdb, v1.EventTypeNormal, "NoPods", "No matching pods found")
 	}
-
+	// 计算pdb所需的状态数值
 	expectedCount, desiredHealthy, unmanagedPods, err := dc.getExpectedPodCount(ctx, pdb, pods)
 	if err != nil {
 		dc.recorder.Eventf(pdb, v1.EventTypeWarning, "CalculateExpectedPodCountFailed", "Failed to calculate the number of expected pods: %v", err)
@@ -708,6 +709,7 @@ func (dc *DisruptionController) trySync(ctx context.Context, pdb *policy.PodDisr
 	}
 
 	currentTime := dc.clock.Now()
+	// 重新构建pdb.Status.DisruptedPods结果
 	disruptedPods, recheckTime := dc.buildDisruptedPodMap(pods, pdb, currentTime)
 	currentHealthy := countHealthyPods(pods, disruptedPods, currentTime)
 	err = dc.updatePdbStatus(ctx, pdb, currentHealthy, desiredHealthy, expectedCount, disruptedPods)
@@ -763,6 +765,9 @@ func (dc *DisruptionController) syncStalePodDisruption(ctx context.Context, key 
 	return nil
 }
 
+// expectedCount： 期望的总Pod数
+// desiredHealthy： 期望的健康Pod数
+// unmanagedPods: 不受ControllerOf管理的Pod列表
 func (dc *DisruptionController) getExpectedPodCount(ctx context.Context, pdb *policy.PodDisruptionBudget, pods []*v1.Pod) (expectedCount, desiredHealthy int32, unmanagedPods []string, err error) {
 	err = nil
 	// TODO(davidopp): consider making the way expectedCount and rules about
@@ -780,6 +785,7 @@ func (dc *DisruptionController) getExpectedPodCount(ctx context.Context, pdb *po
 		if err != nil {
 			return
 		}
+		// 期望的健康Pod数= expectedCount -  maxUnavailable
 		desiredHealthy = expectedCount - int32(maxUnavailable)
 		if desiredHealthy < 0 {
 			desiredHealthy = 0
@@ -805,6 +811,12 @@ func (dc *DisruptionController) getExpectedPodCount(ctx context.Context, pdb *po
 	return
 }
 
+//	 expectedCount: pdb关联的pod所属的控制者（例如：RS，RC，StatefulSet）Replicas的值的和
+//		比如：一个pdb关联两个Pod，Pod1规ReplicaSet1管理，Pod2规ReplicaSet2管理，
+//		其中ReplicaSet1.Spec.Replicas=3,ReplicaSet2.Spec.Replicas=6,
+//		那么expectedCount=3+6=9
+//
+// unmanagedPods: 没有ControllerOf的Pod
 func (dc *DisruptionController) getExpectedScale(ctx context.Context, pdb *policy.PodDisruptionBudget, pods []*v1.Pod) (expectedCount int32, unmanagedPods []string, err error) {
 	// When the user specifies a fraction of pods that must be available, we
 	// use as the fraction's denominator
@@ -876,6 +888,7 @@ func countHealthyPods(pods []*v1.Pod, disruptedPods map[string]metav1.Time, curr
 			continue
 		}
 		// Pod is expected to be deleted soon.
+		// Pod即将被删除，所以不把该Pod认作为健康Pod
 		if disruptionTime, found := disruptedPods[pod.Name]; found && disruptionTime.Time.Add(DeletionTimeout).After(currentTime) {
 			continue
 		}

@@ -162,11 +162,12 @@ func (r *EvictionREST) Create(ctx context.Context, name string, obj runtime.Obje
 
 		// Evicting a terminal pod should result in direct deletion of pod as it already caused disruption by the time we are evicting.
 		// There is no need to check for pdb.
+		// 不能忽略PDB，那么走下边的PDB流程
 		if !canIgnorePDB(pod) {
 			// Pod is not in a state where we can skip checking PDBs, exit the loop, and continue to PDB checks.
 			return nil
 		}
-
+		// 下边逻辑不受PDB限制，直接进行Pod删除逻辑
 		// the PDB can be ignored, so delete the pod
 		deleteOptions := originalDeleteOptions
 
@@ -199,6 +200,7 @@ func (r *EvictionREST) Create(ctx context.Context, name string, obj runtime.Obje
 	default:
 		// this happens when we didn't have an error and we didn't delete the pod. The only branch that happens on is when
 		// we cannot ignored the PDB for this pod, so this is the fall through case.
+		// 不做任何处理，那么会走下边PDB流程，也就是说，pod的驱逐受PDB影响
 	}
 
 	var rtStatus *metav1.Status
@@ -276,6 +278,7 @@ func (r *EvictionREST) Create(ctx context.Context, name string, obj runtime.Obje
 		setPreconditionsResourceVersion(deleteOptions, &pod.ResourceVersion)
 	}
 
+	// 能够走到这里说明PDB已经允许对该Pod进行驱逐，并且我们已经提前将该Pod的信息更新到PDB里面
 	// Try the delete
 	err = addConditionAndDeletePod(r, ctx, eviction.Name, rest.ValidateAllObjectFunc, deleteOptions)
 	if err != nil {
@@ -311,11 +314,12 @@ func addConditionAndDeletePod(r *EvictionREST, ctx context.Context, name string,
 		}
 
 		podCopyUpdated := rest.DefaultUpdatedObjectInfo(pod, conditionAppender)
-
+		// 对Pod进行更新
 		if _, _, err = r.store.Update(ctx, name, podCopyUpdated, rest.ValidateAllObjectFunc, rest.ValidateAllObjectUpdateFunc, false, &metav1.UpdateOptions{}); err != nil {
 			return err
 		}
 	}
+	// 删除Pod
 	_, _, err := r.store.Delete(ctx, name, rest.ValidateAllObjectFunc, options)
 	return err
 }
@@ -381,13 +385,16 @@ func (r *EvictionREST) checkAndDecrement(namespace string, podName string, pdb p
 	if len(pdb.Status.DisruptedPods) > MaxDisruptedPodSize {
 		return errors.NewForbidden(policy.Resource("poddisruptionbudget"), pdb.Name, fmt.Errorf("DisruptedPods map too big - too many evictions not confirmed by PDB controller"))
 	}
+	// 当前可允许驱逐的Pod为0，则不能进行驱逐
 	if pdb.Status.DisruptionsAllowed == 0 {
 		err := errors.NewTooManyRequests("Cannot evict pod as it would violate the pod's disruption budget.", 0)
 		err.ErrStatus.Details.Causes = append(err.ErrStatus.Details.Causes, metav1.StatusCause{Type: policyv1.DisruptionBudgetCause, Message: fmt.Sprintf("The disruption budget %s needs %d healthy pods and has %d currently", pdb.Name, pdb.Status.DesiredHealthy, pdb.Status.CurrentHealthy)})
 		return err
 	}
 
+	// 可驱逐的Pod减1
 	pdb.Status.DisruptionsAllowed--
+	// 当可驱逐Pod为0时，需要更新PDB的Condition信息
 	if pdb.Status.DisruptionsAllowed == 0 {
 		pdbhelper.UpdateDisruptionAllowedCondition(&pdb)
 	}
@@ -405,6 +412,7 @@ func (r *EvictionREST) checkAndDecrement(namespace string, podName string, pdb p
 	// so it should not consider it as available in calculations when updating PodDisruptions allowed.
 	// If the pod is not deleted within a reasonable time limit PDB controller will assume that it won't
 	// be deleted at all and remove it from DisruptedPod map.
+	// 这里记录下当前被驱逐的Pod和被驱逐时间,用于通知PDB控制器，使其能够及时更新自身信息
 	pdb.Status.DisruptedPods[podName] = metav1.Time{Time: time.Now()}
 	if _, err := r.podDisruptionBudgetClient.PodDisruptionBudgets(namespace).UpdateStatus(context.TODO(), &pdb, metav1.UpdateOptions{}); err != nil {
 		return err
