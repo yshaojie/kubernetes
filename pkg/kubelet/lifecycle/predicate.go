@@ -93,9 +93,12 @@ func (w *predicateAdmitHandler) Admit(attrs *PodAdmitAttributes) PodAdmitResult 
 	// the Resource Class API in the future.
 	podWithoutMissingExtendedResources := removeMissingExtendedResources(admitPod, nodeInfo)
 
+	// 执行准入校验，即当前节点是否可以运行该Pod
 	reasons := generalFilter(podWithoutMissingExtendedResources, nodeInfo)
 	fit := len(reasons) == 0
+	// 不满足当前Pod运行条件
 	if !fit {
+		// Pod抢占处理，kubelet需要清除Pod来让该Pod运行
 		reasons, err = w.admissionFailureHandler.HandleAdmissionFailure(admitPod, reasons)
 		fit = len(reasons) == 0 && err == nil
 		if err != nil {
@@ -108,6 +111,7 @@ func (w *predicateAdmitHandler) Admit(attrs *PodAdmitAttributes) PodAdmitResult 
 			}
 		}
 	}
+	// 还是达不到准入条件
 	if !fit {
 		var reason string
 		var message string
@@ -142,6 +146,7 @@ func (w *predicateAdmitHandler) Admit(attrs *PodAdmitAttributes) PodAdmitResult 
 			Message: message,
 		}
 	}
+	// 判断操作系统是否符合要求
 	if rejectPodAdmissionBasedOnOSSelector(admitPod, node) {
 		return PodAdmitResult{
 			Admit:   false,
@@ -150,6 +155,7 @@ func (w *predicateAdmitHandler) Admit(attrs *PodAdmitAttributes) PodAdmitResult 
 		}
 	}
 	// By this time, node labels should have been synced, this helps in identifying the pod with the usage.
+	// 判断操作系统是否符合要求
 	if rejectPodAdmissionBasedOnOSField(admitPod) {
 		return PodAdmitResult{
 			Admit:   false,

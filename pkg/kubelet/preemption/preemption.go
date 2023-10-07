@@ -77,10 +77,12 @@ func (c *CriticalPodAdmissionHandler) HandleAdmissionFailure(admitPod *v1.Pod, f
 			nonResourceReasons = append(nonResourceReasons, reason)
 		}
 	}
+	// 存在非资源不足原因直接返回
 	if len(nonResourceReasons) > 0 {
 		// Return only reasons that are not resource related, since critical pods cannot fail admission for resource reasons.
 		return nonResourceReasons, nil
 	}
+	// 清理Pod
 	err := c.evictPodsToFreeRequests(admitPod, admissionRequirementList(resourceReasons))
 	// if no error is returned, preemption succeeded and the pod is safe to admit.
 	return nil, err
@@ -121,6 +123,8 @@ func (c *CriticalPodAdmissionHandler) evictPodsToFreeRequests(admitPod *v1.Pod, 
 
 // getPodsToPreempt returns a list of pods that could be preempted to free requests >= requirements
 func getPodsToPreempt(pod *v1.Pod, pods []*v1.Pod, requirements admissionRequirementList) ([]*v1.Pod, error) {
+	// 找出比抢占者Pod 优先级高的Pod并进行分类
+	// 因为只能抢占比自己优先级低的Pod
 	bestEffortPods, burstablePods, guaranteedPods := sortPodsByQOS(pod, pods)
 
 	// make sure that pods exist to reclaim the requirements
@@ -129,6 +133,7 @@ func getPodsToPreempt(pod *v1.Pod, pods []*v1.Pod, requirements admissionRequire
 		return nil, fmt.Errorf("no set of running pods found to reclaim resources: %v", unableToMeetRequirements.toString())
 	}
 	// find the guaranteed pods we would need to evict if we already evicted ALL burstable and besteffort pods.
+	// 保证guaranteed类型的Pod最后被驱逐
 	guaranteedToEvict, err := getPodsToPreemptByDistance(guaranteedPods, requirements.subtract(append(bestEffortPods, burstablePods...)...))
 	if err != nil {
 		return nil, err
@@ -155,6 +160,7 @@ func getPodsToPreempt(pod *v1.Pod, pods []*v1.Pod, requirements admissionRequire
 func getPodsToPreemptByDistance(pods []*v1.Pod, requirements admissionRequirementList) ([]*v1.Pod, error) {
 	podsToEvict := []*v1.Pod{}
 	// evict pods by shortest distance from remaining requirements, updating requirements every round.
+	// 一直循环查找需要驱逐的Pod，直到这些Pod 满足requirements的请求
 	for len(requirements) > 0 {
 		if len(pods) == 0 {
 			return nil, fmt.Errorf("no set of running pods found to reclaim resources: %v", requirements.toString())
@@ -165,6 +171,7 @@ func getPodsToPreemptByDistance(pods []*v1.Pod, requirements admissionRequiremen
 		// Find the pod with the smallest distance from requirements
 		// Or, in the case of two equidistant pods, find the pod with "smaller" resource requests.
 		for i, pod := range pods {
+			// 距离越近的越合适，值越小该Pod和需要的资源越近
 			dist := requirements.distance(pod)
 			if dist < bestDistance || (bestDistance == dist && smallerResourceRequest(pod, pods[bestPodIndex])) {
 				bestDistance = dist
@@ -172,8 +179,10 @@ func getPodsToPreemptByDistance(pods []*v1.Pod, requirements admissionRequiremen
 			}
 		}
 		// subtract the pod from requirements, and transfer the pod from input-pods to pods-to-evicted
+		// 去除当前该驱逐的Pod后，还需要释放的资源，然后进行下一轮的Pod选举
 		requirements = requirements.subtract(pods[bestPodIndex])
 		podsToEvict = append(podsToEvict, pods[bestPodIndex])
+		// 去掉已经被选中的Pod
 		pods[bestPodIndex] = pods[len(pods)-1]
 		pods = pods[:len(pods)-1]
 	}
@@ -235,6 +244,7 @@ func (a admissionRequirementList) toString() string {
 // can be preempted by preemptor pod.
 func sortPodsByQOS(preemptor *v1.Pod, pods []*v1.Pod) (bestEffort, burstable, guaranteed []*v1.Pod) {
 	for _, pod := range pods {
+		// 对比是否可以抢占，比自己优先级低即可抢占
 		if kubetypes.Preemptable(preemptor, pod) {
 			switch v1qos.GetPodQOS(pod) {
 			case v1.PodQOSBestEffort:
