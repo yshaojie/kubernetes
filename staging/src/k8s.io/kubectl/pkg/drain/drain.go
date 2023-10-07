@@ -163,6 +163,7 @@ func (d *Helper) EvictPod(pod corev1.Pod, evictionGroupVersion schema.GroupVersi
 			},
 			DeleteOptions: &delOpts,
 		}
+		// 调用驱逐Api
 		return d.Client.PolicyV1().Evictions(eviction.Namespace).Evict(context.TODO(), eviction)
 
 	default:
@@ -255,6 +256,7 @@ func (d *Helper) DeleteOrEvictPods(pods []corev1.Pod) error {
 		return d.Client.CoreV1().Pods(namespace).Get(d.getContext(), name, metav1.GetOptions{})
 	}
 
+	// 判断是否禁用驱逐的方式
 	if !d.DisableEviction {
 		evictionGroupVersion, err := CheckEvictionSupport(d.Client)
 		if err != nil {
@@ -262,10 +264,12 @@ func (d *Helper) DeleteOrEvictPods(pods []corev1.Pod) error {
 		}
 
 		if !evictionGroupVersion.Empty() {
+			// 通过驱逐的方式来清除Pod，这时PDB是起作用的
 			return d.evictPods(pods, evictionGroupVersion, getPodFn)
 		}
 	}
 
+	// 直接删除Pod，此时PDB是不起作用的
 	return d.deletePods(pods, getPodFn)
 }
 
@@ -281,6 +285,7 @@ func (d *Helper) evictPods(pods []corev1.Pod, evictionGroupVersion schema.GroupV
 	ctx, cancel := context.WithTimeout(d.getContext(), globalTimeout)
 	defer cancel()
 	for _, pod := range pods {
+		// 并发删除Pod
 		go func(pod corev1.Pod, returnCh chan error) {
 			refreshPod := false
 			for {
