@@ -171,9 +171,11 @@ func (m *manager) AddPod(pod *v1.Pod) {
 	defer m.workerLock.Unlock()
 
 	key := probeKey{podUID: pod.UID}
+	//遍历pod里面的容器，创建配置的探针worker
 	for _, c := range pod.Spec.Containers {
 		key.containerName = c.Name
 
+		//如果配置了启动探针，则创建
 		if c.StartupProbe != nil {
 			key.probeType = startup
 			if _, ok := m.workers[key]; ok {
@@ -186,6 +188,7 @@ func (m *manager) AddPod(pod *v1.Pod) {
 			go w.run()
 		}
 
+		//如果配置了Readiness探针，则创建
 		if c.ReadinessProbe != nil {
 			key.probeType = readiness
 			if _, ok := m.workers[key]; ok {
@@ -198,6 +201,7 @@ func (m *manager) AddPod(pod *v1.Pod) {
 			go w.run()
 		}
 
+		//如果配置了存活探针，则创建
 		if c.LivenessProbe != nil {
 			key.probeType = liveness
 			if _, ok := m.workers[key]; ok {
@@ -207,6 +211,7 @@ func (m *manager) AddPod(pod *v1.Pod) {
 			}
 			w := newWorker(m, liveness, pod, c)
 			m.workers[key] = w
+			//启动探针
 			go w.run()
 		}
 	}

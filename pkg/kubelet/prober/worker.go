@@ -180,6 +180,7 @@ probeLoop:
 		// Wait for next probe tick.
 		select {
 		case <-w.stopCh:
+			//收到停止信号，跳出循环
 			break probeLoop
 		case <-probeTicker.C:
 		case <-w.manualTriggerCh:
